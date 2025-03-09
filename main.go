@@ -11,8 +11,13 @@ import (
 	"github.com/jrudio/go-plex-client"
 )
 
-// JSON slog
 var logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+type Playlist struct {
+	Title          string
+	Tracks         []Track
+	PlexPlaylistID int
+}
 
 type Track struct {
 	Title    string
@@ -21,36 +26,38 @@ type Track struct {
 }
 
 func main() {
-	baseURL := "http://192.168.68.110:32400"
-	token := os.Getenv("PLEX_TOKEN")
-	playlistID := 27903
+
 	outDir := "/tmp/plex-playlist-export-test"
 
-	client, err := plex.New(baseURL, token)
+	client, err := initialisePlexClient()
 	if err != nil {
-		logger.Error("Error creating client", "error", err)
-		os.Exit(1)
-	}
-
-	_, err = client.Test()
-	if err != nil {
-		logger.Error("Error testing client", "error", err)
+		logger.Error("Error initialising client", "error", err)
 		os.Exit(1)
 	}
 
 	logger.Debug("Client created successfully")
 
-	// Get playlist
-	playlist, err := client.GetPlaylist(playlistID)
+	tracks, err := downloadAndConvertTracks(client, 27903, outDir)
+	if err != nil {
+		logger.Error("Error downloading tracks", "error", err)
+		os.Exit(1)
+	}
+
+	createM3U(tracks, outDir)
+}
+
+func downloadAndConvertTracks(client *plex.Plex, playlistID int, outDir string) ([]Track, error) {
+
+	plexPlaylist, err := client.GetPlaylist(playlistID)
 	if err != nil {
 		logger.Error("Error getting playlist", "error", err)
-		os.Exit(1)
+		return nil, err
 	}
 
 	tracks := make([]Track, 0)
 
 	// TODO: parallelize
-	for _, track := range playlist.MediaContainer.Metadata {
+	for _, track := range plexPlaylist.MediaContainer.Metadata {
 		logger.Info("Track", "title", track.Title)
 		err := client.Download(track, outDir, false, true)
 		if err != nil {
@@ -75,7 +82,25 @@ func main() {
 		}
 	}
 
-	createM3U(tracks, outDir)
+	return tracks, nil
+}
+
+func initialisePlexClient() (*plex.Plex, error) {
+	baseURL := "http://192.168.68.110:32400"
+	token := os.Getenv("PLEX_TOKEN")
+	client, err := plex.New(baseURL, token)
+	if err != nil {
+		logger.Error("Error creating client", "error", err)
+		return nil, err
+	}
+
+	_, err = client.Test()
+	if err != nil {
+		logger.Error("Error testing client", "error", err)
+		return nil, err
+	}
+
+	return client, nil
 }
 
 // Convert FLAC file to MP3 using ffmpeg
