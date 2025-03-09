@@ -26,7 +26,6 @@ type Track struct {
 }
 
 func main() {
-
 	outDir := "/tmp/plex-playlist-export-test"
 
 	client, err := initialisePlexClient()
@@ -46,45 +45,6 @@ func main() {
 	createM3U(tracks, outDir)
 }
 
-func downloadAndConvertTracks(client *plex.Plex, playlistID int, outDir string) ([]Track, error) {
-
-	plexPlaylist, err := client.GetPlaylist(playlistID)
-	if err != nil {
-		logger.Error("Error getting playlist", "error", err)
-		return nil, err
-	}
-
-	tracks := make([]Track, 0)
-
-	// TODO: parallelize
-	for _, track := range plexPlaylist.MediaContainer.Metadata {
-		logger.Info("Track", "title", track.Title)
-		err := client.Download(track, outDir, false, true)
-		if err != nil {
-			logger.Error("Error downloading track", "error", err)
-		}
-		tracks = append(tracks, Track{
-			Title:    track.Title,
-			Duration: track.Duration,
-			Path:     filepath.Join(outDir, filepath.Base(track.Media[0].Part[0].File)),
-		})
-	}
-
-	// Convert FLAC files to MP3
-	for i := range tracks {
-		track := tracks[i]
-		if strings.HasSuffix(track.Path, ".flac") {
-			mp3Path, err := convertFlacToMP3(track.Path, "320k")
-			if err != nil {
-				logger.Error("Error converting FLAC to MP3", "error", err)
-			}
-			tracks[i].Path = mp3Path
-		}
-	}
-
-	return tracks, nil
-}
-
 func initialisePlexClient() (*plex.Plex, error) {
 	baseURL := "http://192.168.68.110:32400"
 	token := os.Getenv("PLEX_TOKEN")
@@ -94,8 +54,7 @@ func initialisePlexClient() (*plex.Plex, error) {
 		return nil, err
 	}
 
-	_, err = client.Test()
-	if err != nil {
+	if _, err = client.Test(); err != nil {
 		logger.Error("Error testing client", "error", err)
 		return nil, err
 	}
@@ -103,32 +62,62 @@ func initialisePlexClient() (*plex.Plex, error) {
 	return client, nil
 }
 
-// Convert FLAC file to MP3 using ffmpeg
-func convertFlacToMP3(flacPath, bitrate string) (string, error) {
+func downloadAndConvertTracks(client *plex.Plex, playlistID int, outDir string) ([]Track, error) {
+	plexPlaylist, err := client.GetPlaylist(playlistID)
+	if err != nil {
+		logger.Error("Error getting playlist", "error", err)
+		return nil, err
+	}
 
-	// Generate output path
+	var tracks []Track
+
+	for _, track := range plexPlaylist.MediaContainer.Metadata {
+		logger.Info("Track", "title", track.Title)
+		if err := client.Download(track, outDir, false, true); err != nil {
+			logger.Error("Error downloading track", "error", err)
+			continue
+		}
+		tracks = append(tracks, Track{
+			Title:    track.Title,
+			Duration: track.Duration,
+			Path:     filepath.Join(outDir, filepath.Base(track.Media[0].Part[0].File)),
+		})
+	}
+
+	for i := range tracks {
+		if strings.HasSuffix(tracks[i].Path, ".flac") {
+			mp3Path, err := convertFlacToMP3(tracks[i].Path, "320k")
+			if err != nil {
+				logger.Error("Error converting FLAC to MP3", "error", err)
+				continue
+			}
+			tracks[i].Path = mp3Path
+		}
+	}
+
+	return tracks, nil
+}
+
+func convertFlacToMP3(flacPath, bitrate string) (string, error) {
 	baseName := filepath.Base(flacPath)
 	mp3Name := strings.Replace(baseName, ".flac", ".mp3", 1)
 	mp3Path := filepath.Join(filepath.Dir(flacPath), mp3Name)
 
-	// Skip if MP3 already exists
 	if _, err := os.Stat(mp3Path); err == nil {
 		fmt.Printf("MP3 already exists: %s\n", mp3Path)
 		return mp3Path, nil
 	}
 
-	// Convert FLAC to MP3 using ffmpeg
 	cmd := exec.Command(
 		"ffmpeg",
 		"-i", flacPath,
-		"-ab", "320k",
+		"-ab", bitrate,
 		"-map_metadata", "0",
 		"-id3v2_version", "3",
 		mp3Path,
 	)
 
-	err := cmd.Run()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("error converting %s: %v", flacPath, err)
 	}
 
