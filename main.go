@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/jrudio/go-plex-client"
 )
@@ -70,30 +71,53 @@ func downloadAndConvertTracks(client *plex.Plex, playlistID int, outDir string) 
 	}
 
 	var tracks []Track
+	var wg sync.WaitGroup
+	var m sync.Mutex
 
+	// TODO: use error group
 	for _, track := range plexPlaylist.MediaContainer.Metadata {
-		logger.Info("Track", "title", track.Title)
-		if err := client.Download(track, outDir, false, true); err != nil {
-			logger.Error("Error downloading track", "error", err)
-			continue
-		}
-		tracks = append(tracks, Track{
-			Title:    track.Title,
-			Duration: track.Duration,
-			Path:     filepath.Join(outDir, filepath.Base(track.Media[0].Part[0].File)),
-		})
+		wg.Add(1)
+		go func(track plex.Metadata) {
+			defer wg.Done()
+			logger.Info("Downloading track", "title", track.Title)
+			if err := client.Download(track, outDir, false, true); err != nil {
+				logger.Error("Error downloading track", "error", err)
+				return
+			}
+			logger.Info("Downloaded track", "title", track.Title)
+
+			m.Lock()
+			tracks = append(tracks, Track{
+				Title:    track.Title,
+				Duration: track.Duration,
+				Path:     filepath.Join(outDir, filepath.Base(track.Media[0].Part[0].File)),
+			})
+			m.Unlock()
+		}(track)
 	}
 
+	wg.Wait()
+
+	// TODO: use error group
 	for i := range tracks {
-		if strings.HasSuffix(tracks[i].Path, ".flac") {
-			mp3Path, err := convertFlacToMP3(tracks[i].Path, "320k")
-			if err != nil {
-				logger.Error("Error converting FLAC to MP3", "error", err)
-				continue
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if strings.HasSuffix(tracks[i].Path, ".flac") {
+				mp3Path, err := convertFlacToMP3(tracks[i].Path, "320k")
+				if err != nil {
+					logger.Error("Error converting FLAC to MP3", "error", err)
+					return
+				}
+
+				m.Lock()
+				tracks[i].Path = mp3Path
+				m.Unlock()
 			}
-			tracks[i].Path = mp3Path
-		}
+		}(i)
 	}
+
+	wg.Wait()
 
 	return tracks, nil
 }
