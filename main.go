@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -27,9 +28,28 @@ type Track struct {
 }
 
 func main() {
-	outDir := "/tmp/plex-playlist-export-test"
 
-	client, err := initialisePlexClient()
+	if len(os.Args) < 3 {
+		logger.Error("Usage: plex-export <playlist_id> <out_dir>")
+		os.Exit(1)
+	}
+
+	outDir := os.Args[2]
+	playlistID, err := strconv.Atoi(os.Args[1])
+	if err != nil {
+		logger.Error("Error parsing playlist ID", "error", err, "playlist_id", os.Args[1])
+		os.Exit(1)
+	}
+
+	baseURL := os.Getenv("PLEX_URL")
+	token := os.Getenv("PLEX_TOKEN")
+
+	if baseURL == "" || token == "" {
+		logger.Error("PLEX_URL and PLEX_TOKEN environment variables must be set")
+		os.Exit(1)
+	}
+
+	client, err := initialisePlexClient(baseURL, token)
 	if err != nil {
 		logger.Error("Error initialising client", "error", err)
 		os.Exit(1)
@@ -37,7 +57,17 @@ func main() {
 
 	logger.Debug("Client created successfully")
 
-	tracks, err := downloadAndConvertTracks(client, 27903, outDir)
+	logger.Debug("Creating output directory", "dir", outDir)
+	dir := filepath.Dir(outDir)
+
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			logger.Error("Error creating output directory", "error", err)
+			os.Exit(1)
+		}
+	}
+
+	tracks, err := downloadAndConvertTracks(client, playlistID, outDir)
 	if err != nil {
 		logger.Error("Error downloading tracks", "error", err)
 		os.Exit(1)
@@ -46,9 +76,7 @@ func main() {
 	createM3U(tracks, outDir)
 }
 
-func initialisePlexClient() (*plex.Plex, error) {
-	baseURL := "http://192.168.68.110:32400"
-	token := os.Getenv("PLEX_TOKEN")
+func initialisePlexClient(baseURL, token string) (*plex.Plex, error) {
 	client, err := plex.New(baseURL, token)
 	if err != nil {
 		logger.Error("Error creating client", "error", err)
@@ -149,12 +177,19 @@ func convertFlacToMP3(flacPath, bitrate string) (string, error) {
 	return mp3Path, nil
 }
 
-func createM3U(tracks []Track, outDir string) {
+func createM3U(tracks []Track, outDir string) error {
 	m3uPath := filepath.Join(outDir, "plex-dj.m3u")
+	dir := filepath.Dir(m3uPath)
+
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("error creating directory %s: %v", dir, err)
+		}
+	}
+
 	f, err := os.Create(m3uPath)
 	if err != nil {
-		logger.Error("Error creating m3u file", "error", err)
-		return
+		return fmt.Errorf("error creating file %s: %v", m3uPath, err)
 	}
 	defer f.Close()
 
@@ -165,4 +200,5 @@ func createM3U(tracks []Track, outDir string) {
 	}
 
 	logger.Info("Playlist created", "path", m3uPath)
+	return nil
 }
