@@ -6,11 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/jrudio/go-plex-client"
+	"github.com/urfave/cli/v2"
 )
 
 var logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -29,18 +29,39 @@ type Track struct {
 
 func main() {
 
-	if len(os.Args) < 3 {
-		logger.Error("Usage: plex-export <playlist_id> <out_dir>")
-		os.Exit(1)
+	app := &cli.App{
+		Name:  "export",
+		Usage: "Export a Plex playlist to an M3U file",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:     "out-dir",
+				Usage:    "output directory for files and playlist",
+				Required: true,
+			},
+			&cli.IntFlag{
+				Name:     "playlist-id",
+				Usage:    "Plex playlist ID",
+				Required: true,
+			},
+		},
+		Action: func(c *cli.Context) error {
+			err := export(c.Int("playlist-id"), c.String("out-dir"))
+			if err != nil {
+				logger.Error("Error exporting playlist", "error", err)
+				return err
+			}
+
+			return nil
+		},
 	}
 
-	outDir := os.Args[2]
-	playlistID, err := strconv.Atoi(os.Args[1])
-	if err != nil {
-		logger.Error("Error parsing playlist ID", "error", err, "playlist_id", os.Args[1])
+	if err := app.Run(os.Args); err != nil {
+		logger.Error("Error running app", "error", err)
 		os.Exit(1)
 	}
+}
 
+func export(playlistID int, outDir string) error {
 	baseURL := os.Getenv("PLEX_URL")
 	token := os.Getenv("PLEX_TOKEN")
 
@@ -74,6 +95,8 @@ func main() {
 	}
 
 	createM3U(tracks, outDir)
+
+	return nil
 }
 
 func initialisePlexClient(baseURL, token string) (*plex.Plex, error) {
