@@ -35,17 +35,12 @@ func main() {
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:     "out-dir",
-				Usage:    "output directory for files and playlist",
-				Required: true,
-			},
-			&cli.IntFlag{
-				Name:     "playlist-id",
-				Usage:    "Plex playlist ID",
+				Usage:    "output directory for files and playlist(s)",
 				Required: true,
 			},
 		},
 		Action: func(c *cli.Context) error {
-			err := export(c.Int("playlist-id"), c.String("out-dir"))
+			err := export(c.String("out-dir"))
 			if err != nil {
 				logger.Error("Error exporting playlist", "error", err)
 				return err
@@ -61,7 +56,7 @@ func main() {
 	}
 }
 
-func export(playlistID int, outDir string) error {
+func export(outDir string) error {
 	baseURL := os.Getenv("PLEX_URL")
 	token := os.Getenv("PLEX_TOKEN")
 
@@ -87,6 +82,22 @@ func export(playlistID int, outDir string) error {
 			os.Exit(1)
 		}
 	}
+
+	// TODO - Make this pretty, add validation on input
+	playlists, err := client.GetPlaylists()
+	if err != nil {
+		logger.Error("Error getting playlists", "error", err)
+		return err
+	}
+
+	fmt.Println("Playlists:")
+	for _, playlist := range playlists.MediaContainer.Metadata {
+		fmt.Printf("%s: %s\n", playlist.RatingKey, playlist.Title)
+	}
+
+	var playlistID int
+	fmt.Print("Enter playlist ID: ")
+	fmt.Scan(&playlistID)
 
 	tracks, err := downloadAndConvertTracks(client, playlistID, outDir)
 	if err != nil {
