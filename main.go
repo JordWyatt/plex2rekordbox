@@ -13,6 +13,7 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/jrudio/go-plex-client"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/errgroup"
 )
 
 var logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -142,53 +143,44 @@ func downloadAndConvertTracks(client *plex.Plex, playlistID int, outDir string) 
 	}
 
 	var tracks []Track
-	var wg sync.WaitGroup
+	var g errgroup.Group
 	var m sync.Mutex
 
-	// TODO: use error group
 	for _, track := range plexPlaylist.MediaContainer.Metadata {
-		wg.Add(1)
-		go func(track plex.Metadata) {
-			defer wg.Done()
+		track := track
+		g.Go(func() error {
 			logger.Info("Downloading track", "title", track.Title)
 			if err := client.Download(track, outDir, false, true); err != nil {
-				logger.Error("Error downloading track", "error", err)
-				return
+				return fmt.Errorf("error downloading track %s: %v", track.Title, err)
 			}
 			logger.Info("Downloaded track", "title", track.Title)
 
-			m.Lock()
-			tracks = append(tracks, Track{
+			track := Track{
 				Title:    track.Title,
-				Duration: track.Duration,
+				Duration: track.Media[0].Duration,
 				Path:     filepath.Join(outDir, filepath.Base(track.Media[0].Part[0].File)),
-			})
-			m.Unlock()
-		}(track)
-	}
+			}
 
-	wg.Wait()
-
-	// TODO: use error group
-	for i := range tracks {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			if strings.HasSuffix(tracks[i].Path, ".flac") {
-				mp3Path, err := convertFlacToMP3(tracks[i].Path, "320k")
+			if strings.HasSuffix(track.Path, ".flac") {
+				mp3Path, err := convertFlacToMP3(track.Path, "320k")
 				if err != nil {
-					logger.Error("Error converting FLAC to MP3", "error", err)
-					return
+					return fmt.Errorf("error converting flac to mp3: %v", err)
 				}
 
-				m.Lock()
-				tracks[i].Path = mp3Path
-				m.Unlock()
+				track.Path = mp3Path
 			}
-		}(i)
+
+			m.Lock()
+			tracks = append(tracks, track)
+			m.Unlock()
+
+			return nil
+		})
 	}
 
-	wg.Wait()
+	if err := g.Wait(); err != nil {
+		return nil, fmt.Errorf("error downloading and converting tracks: %v", err)
+	}
 
 	return tracks, nil
 }
