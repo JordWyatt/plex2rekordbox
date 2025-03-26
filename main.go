@@ -74,12 +74,9 @@ func export(outDir string) error {
 	logger.Debug("Client created successfully")
 
 	logger.Debug("Creating output directory", "dir", outDir)
-	dir := filepath.Dir(outDir)
 
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("error creating directory %s: %v", dir, err)
-		}
+	if err := createDirectory(outDir); err != nil {
+		return fmt.Errorf("error creating directory: %v", err)
 	}
 
 	playlistsResponse, err := client.GetPlaylists()
@@ -104,13 +101,10 @@ func export(outDir string) error {
 func exportPlaylist(client *plex.Plex, playlist plex.Metadata, baseDir string) error {
 	outDir := filepath.Join(baseDir, playlist.Title)
 
-	if _, err := os.Stat(outDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(outDir, 0755); err != nil {
-			return fmt.Errorf("error creating directory %s: %v", outDir, err)
-		}
+	if err := createDirectory(outDir); err != nil {
+		return fmt.Errorf("error creating directory: %v", err)
 	}
 
-	playlistName := playlist.Title
 	playlistIDInt, err := strconv.Atoi(playlist.RatingKey)
 	if err != nil {
 		return fmt.Errorf("error converting playlist ID to int: %v", err)
@@ -121,9 +115,8 @@ func exportPlaylist(client *plex.Plex, playlist plex.Metadata, baseDir string) e
 		return fmt.Errorf("error downloading and converting tracks: %v", err)
 	}
 
-	err = createM3U(tracks, playlistName, outDir)
-	if err != nil {
-		return fmt.Errorf("error creating M3U: %v", err)
+	if err := createM3U(tracks, playlist.Title, outDir); err != nil {
+		return fmt.Errorf("error creating M3U: %w", err)
 	}
 
 	return nil
@@ -232,14 +225,12 @@ func convertFlacToMP3(flacPath, bitrate string) (string, error) {
 }
 
 func createM3U(tracks []Track, playlistName, outDir string) error {
-	playlistName = strings.Replace(playlistName, " ", "_", -1)
+	playlistName = sanitizeFileName(playlistName)
 	m3uPath := filepath.Join(outDir, fmt.Sprintf("%s.m3u", playlistName))
 	dir := filepath.Dir(m3uPath)
 
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("error creating directory %s: %v", dir, err)
-		}
+	if err := createDirectory(dir); err != nil {
+		return fmt.Errorf("error creating directory: %v", err)
 	}
 
 	f, err := os.Create(m3uPath)
@@ -271,7 +262,9 @@ func promptForPlaylistSelection(playlists []plex.Metadata) ([]plex.Metadata, err
 		Options: playlistTitles,
 	}
 
-	survey.AskOne(prompt, &selectedPlaylistIndices)
+	if err := survey.AskOne(prompt, &selectedPlaylistIndices); err != nil {
+		return nil, fmt.Errorf("error selecting playlists: %v", err)
+	}
 
 	fmt.Println("Selected playlists:", selectedPlaylistIndices)
 
@@ -282,4 +275,18 @@ func promptForPlaylistSelection(playlists []plex.Metadata) ([]plex.Metadata, err
 	}
 
 	return playlistsToExport, nil
+}
+
+func createDirectory(dir string) error {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("error creating directory %s: %v", dir, err)
+		}
+	}
+
+	return nil
+}
+
+func sanitizeFileName(name string) string {
+	return strings.ReplaceAll(name, " ", "_")
 }
