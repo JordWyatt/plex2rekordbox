@@ -63,14 +63,12 @@ func export(outDir string) error {
 	token := os.Getenv("PLEX_TOKEN")
 
 	if baseURL == "" || token == "" {
-		logger.Error("PLEX_URL and PLEX_TOKEN environment variables must be set")
-		os.Exit(1)
+		return fmt.Errorf("PLEX_URL and PLEX_TOKEN environment variables must be set")
 	}
 
 	client, err := initialisePlexClient(baseURL, token)
 	if err != nil {
-		logger.Error("Error initialising client", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("error initialising client: %v", err)
 	}
 
 	logger.Debug("Client created successfully")
@@ -80,8 +78,7 @@ func export(outDir string) error {
 
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			logger.Error("Error creating output directory", "error", err)
-			os.Exit(1)
+			return fmt.Errorf("error creating directory %s: %v", dir, err)
 		}
 	}
 
