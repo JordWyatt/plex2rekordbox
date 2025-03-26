@@ -6,9 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/AlecAivazis/survey/v2"
 	"github.com/jrudio/go-plex-client"
 	"github.com/urfave/cli/v2"
 )
@@ -83,29 +85,53 @@ func export(outDir string) error {
 		}
 	}
 
-	// TODO - Make this pretty, add validation on input
-	playlists, err := client.GetPlaylists()
+	playlistsResponse, err := client.GetPlaylists()
 	if err != nil {
 		logger.Error("Error getting playlists", "error", err)
 		return err
 	}
 
-	fmt.Println("Playlists:")
-	for _, playlist := range playlists.MediaContainer.Metadata {
-		fmt.Printf("%s: %s\n", playlist.RatingKey, playlist.Title)
-	}
-
-	var playlistID int
-	fmt.Print("Enter playlist ID: ")
-	fmt.Scan(&playlistID)
-
-	tracks, err := downloadAndConvertTracks(client, playlistID, outDir)
+	playlists := playlistsResponse.MediaContainer.Metadata
+	playlistsToExport, err := promptForPlaylistSelection(playlists)
 	if err != nil {
-		logger.Error("Error downloading tracks", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("error selecting playlists: %v", err)
 	}
 
-	createM3U(tracks, outDir)
+	for _, playlist := range playlistsToExport {
+		logger.Info("Exporting playlist", "playlist_name", playlist.Title, "playlist_id", playlist.RatingKey)
+		exportPlaylist(client, playlist, outDir)
+	}
+
+	return nil
+}
+
+func exportPlaylist(client *plex.Plex, playlist plex.Metadata, baseDir string) error {
+	outDir := filepath.Join(baseDir, playlist.Title)
+
+	if _, err := os.Stat(outDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(outDir, 0755); err != nil {
+			return fmt.Errorf("error creating directory %s: %v", outDir, err)
+		}
+	}
+
+	playlistName := playlist.Title
+	playlistIDInt, err := strconv.Atoi(playlist.RatingKey)
+	if err != nil {
+		logger.Error("Error converting playlist ID to int", "error", err)
+		return err
+	}
+
+	tracks, err := downloadAndConvertTracks(client, playlistIDInt, outDir)
+	if err != nil {
+		logger.Error("Error downloading and converting tracks", "error", err)
+		return err
+	}
+
+	err = createM3U(tracks, playlistName, outDir)
+	if err != nil {
+		logger.Error("Error creating M3U", "error", err)
+		return err
+	}
 
 	return nil
 }
@@ -207,12 +233,17 @@ func convertFlacToMP3(flacPath, bitrate string) (string, error) {
 		return "", fmt.Errorf("error converting %s: %v", flacPath, err)
 	}
 
+	if err := os.Remove(flacPath); err != nil {
+		return "", fmt.Errorf("error removing flac file %s: %v", flacPath, err)
+	}
+
 	fmt.Printf("Converted: %s -> %s\n", flacPath, mp3Path)
 	return mp3Path, nil
 }
 
-func createM3U(tracks []Track, outDir string) error {
-	m3uPath := filepath.Join(outDir, "plex-dj.m3u")
+func createM3U(tracks []Track, playlistName, outDir string) error {
+	playlistName = strings.Replace(playlistName, " ", "_", -1)
+	m3uPath := filepath.Join(outDir, fmt.Sprintf("%s.m3u", playlistName))
 	dir := filepath.Dir(m3uPath)
 
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -233,6 +264,32 @@ func createM3U(tracks []Track, outDir string) error {
 		f.WriteString(fmt.Sprintf("#EXTINF:%d,%s\n%s\n", track.Duration, track.Title, track.Path))
 	}
 
-	logger.Info("Playlist created", "path", m3uPath)
+	logger.Info("M3U created", "path", m3uPath)
 	return nil
+}
+
+func promptForPlaylistSelection(playlists []plex.Metadata) ([]plex.Metadata, error) {
+	playlistTitles := []string{}
+	for _, playlist := range playlists {
+		playlistTitles = append(playlistTitles, playlist.Title)
+	}
+
+	selectedPlaylistIndices := []int{}
+
+	prompt := &survey.MultiSelect{
+		Message: "Select playlists to export",
+		Options: playlistTitles,
+	}
+
+	survey.AskOne(prompt, &selectedPlaylistIndices)
+
+	fmt.Println("Selected playlists:", selectedPlaylistIndices)
+
+	playlistsToExport := []plex.Metadata{}
+
+	for _, index := range selectedPlaylistIndices {
+		playlistsToExport = append(playlistsToExport, playlists[index])
+	}
+
+	return playlistsToExport, nil
 }
