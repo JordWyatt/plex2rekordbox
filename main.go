@@ -60,12 +60,7 @@ func main() {
 }
 
 func export(outDir string) error {
-	baseURL := os.Getenv("PLEX_URL")
-	token := os.Getenv("PLEX_TOKEN")
-
-	if baseURL == "" || token == "" {
-		return fmt.Errorf("PLEX_URL and PLEX_TOKEN environment variables must be set")
-	}
+	baseURL, token, err := getPlexConfig()
 
 	client, err := initialisePlexClient(baseURL, token)
 	if err != nil {
@@ -281,4 +276,13 @@ func createDirectory(dir string) error {
 
 func sanitizeFileName(name string) string {
 	return strings.ReplaceAll(name, " ", "_")
+}
+
+func getPlexConfig() (string, string, error) {
+	baseURL := os.Getenv("PLEX_URL")
+	token := os.Getenv("PLEX_TOKEN")
+	if baseURL == "" || token == "" {
+		return "", "", fmt.Errorf("PLEX_URL and PLEX_TOKEN environment variables must be set")
+	}
+	return baseURL, token, nil
 }
