@@ -46,7 +46,7 @@ func main() {
 			err := export(c.String("out-dir"))
 			if err != nil {
 				logger.Error("Error exporting playlist", "error", err)
-				return fmt.Errorf("error exporting playlist: %v", err)
+				return fmt.Errorf("error exporting playlist: %w", err)
 			}
 
 			return nil
@@ -69,7 +69,7 @@ func export(outDir string) error {
 
 	client, err := initialisePlexClient(baseURL, token)
 	if err != nil {
-		return fmt.Errorf("error initialising client: %v", err)
+		return fmt.Errorf("error initialising client: %w", err)
 	}
 
 	logger.Debug("Client created successfully")
@@ -77,18 +77,18 @@ func export(outDir string) error {
 	logger.Debug("Creating output directory", "dir", outDir)
 
 	if err := createDirectory(outDir); err != nil {
-		return fmt.Errorf("error creating directory: %v", err)
+		return fmt.Errorf("error creating directory: %w", err)
 	}
 
 	playlistsResponse, err := client.GetPlaylists()
 	if err != nil {
-		return fmt.Errorf("error getting playlists: %v", err)
+		return fmt.Errorf("error getting playlists: %w", err)
 	}
 
 	playlists := playlistsResponse.MediaContainer.Metadata
 	playlistsToExport, err := promptForPlaylistSelection(playlists)
 	if err != nil {
-		return fmt.Errorf("error selecting playlists: %v", err)
+		return fmt.Errorf("error selecting playlists: %w", err)
 	}
 
 	for _, playlist := range playlistsToExport {
@@ -103,17 +103,17 @@ func exportPlaylist(client *plex.Plex, playlist plex.Metadata, baseDir string) e
 	outDir := filepath.Join(baseDir, playlist.Title)
 
 	if err := createDirectory(outDir); err != nil {
-		return fmt.Errorf("error creating directory: %v", err)
+		return fmt.Errorf("error creating directory: %w", err)
 	}
 
 	playlistIDInt, err := strconv.Atoi(playlist.RatingKey)
 	if err != nil {
-		return fmt.Errorf("error converting playlist ID to int: %v", err)
+		return fmt.Errorf("error converting playlist ID to int: %w", err)
 	}
 
 	tracks, err := downloadAndConvertTracks(client, playlistIDInt, outDir)
 	if err != nil {
-		return fmt.Errorf("error downloading and converting tracks: %v", err)
+		return fmt.Errorf("error downloading and converting tracks: %w", err)
 	}
 
 	if err := createM3U(tracks, playlist.Title, outDir); err != nil {
@@ -126,11 +126,11 @@ func exportPlaylist(client *plex.Plex, playlist plex.Metadata, baseDir string) e
 func initialisePlexClient(baseURL, token string) (*plex.Plex, error) {
 	client, err := plex.New(baseURL, token)
 	if err != nil {
-		return nil, fmt.Errorf("error creating plex client: %v", err)
+		return nil, fmt.Errorf("error creating plex client: %w", err)
 	}
 
 	if _, err = client.Test(); err != nil {
-		return nil, fmt.Errorf("error testing plex client: %v", err)
+		return nil, fmt.Errorf("error testing plex client: %w", err)
 	}
 
 	return client, nil
@@ -139,7 +139,7 @@ func initialisePlexClient(baseURL, token string) (*plex.Plex, error) {
 func downloadAndConvertTracks(client *plex.Plex, playlistID int, outDir string) ([]Track, error) {
 	plexPlaylist, err := client.GetPlaylist(playlistID)
 	if err != nil {
-		return nil, fmt.Errorf("error getting playlist: %v", err)
+		return nil, fmt.Errorf("error getting playlist: %w", err)
 	}
 
 	var tracks []Track
@@ -151,7 +151,7 @@ func downloadAndConvertTracks(client *plex.Plex, playlistID int, outDir string) 
 		g.Go(func() error {
 			logger.Info("Downloading track", "title", track.Title)
 			if err := client.Download(track, outDir, false, true); err != nil {
-				return fmt.Errorf("error downloading track %s: %v", track.Title, err)
+				return fmt.Errorf("error downloading track %s: %w", track.Title, err)
 			}
 			logger.Info("Downloaded track", "title", track.Title)
 
@@ -164,7 +164,7 @@ func downloadAndConvertTracks(client *plex.Plex, playlistID int, outDir string) 
 			if strings.HasSuffix(track.Path, ".flac") {
 				mp3Path, err := convertFlacToMP3(track.Path, "320k")
 				if err != nil {
-					return fmt.Errorf("error converting flac to mp3: %v", err)
+					return fmt.Errorf("error converting flac to mp3: %w", err)
 				}
 
 				track.Path = mp3Path
@@ -179,7 +179,7 @@ func downloadAndConvertTracks(client *plex.Plex, playlistID int, outDir string) 
 	}
 
 	if err := g.Wait(); err != nil {
-		return nil, fmt.Errorf("error downloading and converting tracks: %v", err)
+		return nil, fmt.Errorf("error downloading and converting tracks: %w", err)
 	}
 
 	return tracks, nil
@@ -205,11 +205,11 @@ func convertFlacToMP3(flacPath, bitrate string) (string, error) {
 	)
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("error converting %s: %v", flacPath, err)
+		return "", fmt.Errorf("error converting %s: %w", flacPath, err)
 	}
 
 	if err := os.Remove(flacPath); err != nil {
-		return "", fmt.Errorf("error removing flac file %s: %v", flacPath, err)
+		return "", fmt.Errorf("error removing flac file %s: %w", flacPath, err)
 	}
 
 	fmt.Printf("Converted: %s -> %s\n", flacPath, mp3Path)
@@ -222,12 +222,12 @@ func createM3U(tracks []Track, playlistName, outDir string) error {
 	dir := filepath.Dir(m3uPath)
 
 	if err := createDirectory(dir); err != nil {
-		return fmt.Errorf("error creating directory: %v", err)
+		return fmt.Errorf("error creating directory: %w", err)
 	}
 
 	f, err := os.Create(m3uPath)
 	if err != nil {
-		return fmt.Errorf("error creating file %s: %v", m3uPath, err)
+		return fmt.Errorf("error creating file %s: %w", m3uPath, err)
 	}
 	defer f.Close()
 
@@ -255,7 +255,7 @@ func promptForPlaylistSelection(playlists []plex.Metadata) ([]plex.Metadata, err
 	}
 
 	if err := survey.AskOne(prompt, &selectedPlaylistIndices); err != nil {
-		return nil, fmt.Errorf("error selecting playlists: %v", err)
+		return nil, fmt.Errorf("error selecting playlists: %w", err)
 	}
 
 	fmt.Println("Selected playlists:", selectedPlaylistIndices)
@@ -272,7 +272,7 @@ func promptForPlaylistSelection(playlists []plex.Metadata) ([]plex.Metadata, err
 func createDirectory(dir string) error {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("error creating directory %s: %v", dir, err)
+			return fmt.Errorf("error creating directory %s: %w", dir, err)
 		}
 	}
 
