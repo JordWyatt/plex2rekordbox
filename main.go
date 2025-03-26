@@ -45,7 +45,7 @@ func main() {
 			err := export(c.String("out-dir"))
 			if err != nil {
 				logger.Error("Error exporting playlist", "error", err)
-				return err
+				return fmt.Errorf("error exporting playlist: %v", err)
 			}
 
 			return nil
@@ -87,8 +87,7 @@ func export(outDir string) error {
 
 	playlistsResponse, err := client.GetPlaylists()
 	if err != nil {
-		logger.Error("Error getting playlists", "error", err)
-		return err
+		return fmt.Errorf("error getting playlists: %v", err)
 	}
 
 	playlists := playlistsResponse.MediaContainer.Metadata
@@ -117,20 +116,17 @@ func exportPlaylist(client *plex.Plex, playlist plex.Metadata, baseDir string) e
 	playlistName := playlist.Title
 	playlistIDInt, err := strconv.Atoi(playlist.RatingKey)
 	if err != nil {
-		logger.Error("Error converting playlist ID to int", "error", err)
-		return err
+		return fmt.Errorf("error converting playlist ID to int: %v", err)
 	}
 
 	tracks, err := downloadAndConvertTracks(client, playlistIDInt, outDir)
 	if err != nil {
-		logger.Error("Error downloading and converting tracks", "error", err)
-		return err
+		return fmt.Errorf("error downloading and converting tracks: %v", err)
 	}
 
 	err = createM3U(tracks, playlistName, outDir)
 	if err != nil {
-		logger.Error("Error creating M3U", "error", err)
-		return err
+		return fmt.Errorf("error creating M3U: %v", err)
 	}
 
 	return nil
@@ -139,13 +135,11 @@ func exportPlaylist(client *plex.Plex, playlist plex.Metadata, baseDir string) e
 func initialisePlexClient(baseURL, token string) (*plex.Plex, error) {
 	client, err := plex.New(baseURL, token)
 	if err != nil {
-		logger.Error("Error creating client", "error", err)
-		return nil, err
+		return nil, fmt.Errorf("error creating plex client: %v", err)
 	}
 
 	if _, err = client.Test(); err != nil {
-		logger.Error("Error testing client", "error", err)
-		return nil, err
+		return nil, fmt.Errorf("error testing plex client: %v", err)
 	}
 
 	return client, nil
@@ -154,8 +148,7 @@ func initialisePlexClient(baseURL, token string) (*plex.Plex, error) {
 func downloadAndConvertTracks(client *plex.Plex, playlistID int, outDir string) ([]Track, error) {
 	plexPlaylist, err := client.GetPlaylist(playlistID)
 	if err != nil {
-		logger.Error("Error getting playlist", "error", err)
-		return nil, err
+		return nil, fmt.Errorf("error getting playlist: %v", err)
 	}
 
 	var tracks []Track
