@@ -91,6 +91,25 @@ func export(outDir string) error {
 		exportPlaylist(client, playlist, outDir)
 	}
 
+	// remove all flac files from outDir
+	if err := filepath.Walk(outDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return fmt.Errorf("error walking path %s: %w", path, err)
+		}
+
+		if strings.HasSuffix(info.Name(), ".flac") {
+			if err := os.Remove(path); err != nil {
+				return fmt.Errorf("error removing flac file %s: %w", path, err)
+			}
+			logger.Info("Removed flac file", "path", path)
+		}
+
+		return nil
+	}); err != nil {
+		return fmt.Errorf("error walking output directory: %w", err)
+	}
+
+	logger.Info("Export completed successfully", "output_directory", outDir)
 	return nil
 }
 
@@ -144,6 +163,11 @@ func downloadAndConvertTracks(client *plex.Plex, playlistID int, outDir string) 
 	for _, track := range plexPlaylist.MediaContainer.Metadata {
 		track := track
 		g.Go(func() error {
+			if doesTrackExist(track, outDir) {
+				logger.Info("Track already exists, skipping", "title", track.Title)
+				return nil
+			}
+
 			logger.Info("Downloading track", "title", track.Title)
 			if err := client.Download(track, outDir, false, true); err != nil {
 				return fmt.Errorf("error downloading track %s: %w", track.Title, err)
@@ -285,4 +309,19 @@ func getPlexConfig() (string, string, error) {
 		return "", "", fmt.Errorf("PLEX_URL and PLEX_TOKEN environment variables must be set")
 	}
 	return baseURL, token, nil
+}
+
+func doesTrackExist(track plex.Metadata, outDir string) bool {
+	flacPath := filepath.Join(outDir, filepath.Base(track.Media[0].Part[0].File))
+	baseName := filepath.Base(flacPath)
+	mp3Name := strings.Replace(baseName, ".flac", ".mp3", 1)
+	mp3Path := filepath.Join(filepath.Dir(flacPath), mp3Name)
+
+	if _, err := os.Stat(mp3Path); err == nil {
+		fmt.Printf("MP3 already exists: %s\n", mp3Path)
+		return true
+	}
+
+	fmt.Printf("MP3 does not exist: %s\n", mp3Path)
+	return false
 }
